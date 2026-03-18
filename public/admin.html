@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>管理控制台</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="adm-body">
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-c"></div>
+  <main class="adm-page">
+
+    <!-- ===== 顶部：标题 + 二维码 ===== -->
+    <header class="adm-header">
+      <div class="adm-header-left">
+        <span class="adm-brand">KTV Queue Live</span>
+        <span class="adm-control-badge">CONTROL</span>
+      </div>
+      <a id="requestUrlBadge" class="adm-url-badge" href="#" target="_blank" rel="noreferrer">加载中...</a>
+    </header>
+
+    <section class="adm-top-grid">
+      <!-- 左：当前播放 (大字) -->
+      <div id="liveSongCard" class="adm-card adm-song-card">
+        <div class="adm-card-eyebrow">CURRENT SONG</div>
+        <div class="adm-song-title">等待读取...</div>
+      </div>
+
+      <!-- 中：队列统计 (大数字) -->
+      <div class="adm-card adm-stats-card">
+        <div class="adm-card-eyebrow">QUEUE</div>
+        <div class="adm-stats-pair">
+          <div class="adm-stat-block">
+            <div class="adm-stat-num" id="statQueueCount">—</div>
+            <div class="adm-stat-label">首待播</div>
+          </div>
+          <div class="adm-stat-divider"></div>
+          <div class="adm-stat-block">
+            <div class="adm-stat-num adm-stat-num-time" id="statWaitTime">—:——</div>
+            <div class="adm-stat-label">预计等待</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：二维码 -->
+      <div class="adm-card adm-qr-card">
+        <div class="adm-card-eyebrow">SCAN TO REQUEST</div>
+        <div id="qrCodeBox" class="adm-qr-box">
+          <div class="adm-qr-loading">加载中...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 快捷操作栏 ===== -->
+    <section class="adm-actions-bar">
+      <button id="endSessionButton" class="adm-btn adm-btn-danger adm-btn-lg">
+        <span class="adm-btn-icon">■</span> 结束本次歌单
+      </button>
+    </section>
+
+    <!-- ===== 中部：浏览器状态 + 歌单 ===== -->
+    <section class="adm-mid-grid">
+      <div class="adm-card adm-runtime-card">
+        <div class="adm-card-eyebrow">LIVE RUNTIME</div>
+        <div id="runtimeTile" class="adm-runtime-content">正在加载浏览器状态...</div>
+      </div>
+
+      <div class="adm-card adm-playlist-card">
+        <div class="adm-card-eyebrow">PLAYLIST LINK</div>
+        <div id="playlistTile" class="adm-playlist-content">等待读取共享歌单...</div>
+      </div>
+    </section>
+
+    <!-- ===== 底部：配置表单 + 摘要 ===== -->
+    <section class="adm-bottom-grid">
+      <div class="adm-card adm-form-card">
+        <div class="adm-card-eyebrow">PLAYWRIGHT SETUP</div>
+        <h2 class="adm-form-heading">自动化配置</h2>
+        <form id="playwrightForm">
+          <div class="adm-checkbox-row">
+            <label class="adm-checkbox-item">
+              <input id="playwrightEnabledInput" type="checkbox" />
+              <span>启用自动写共享歌单</span>
+            </label>
+            <label class="adm-checkbox-item">
+              <input id="playwrightHeadlessInput" type="checkbox" />
+              <span>无头模式</span>
+            </label>
+            <label class="adm-checkbox-item">
+              <input id="playwrightAutoPlayInput" type="checkbox" />
+              <span>加歌后自动点击歌单播放</span>
+            </label>
+          </div>
+          <div class="adm-field-grid">
+            <label class="adm-field-label">
+              浏览器通道
+              <input id="playwrightBrowserChannelInput" class="adm-input" name="browserChannel" placeholder="留空用 Playwright Chromium，可填 chrome / msedge" />
+            </label>
+            <label class="adm-field-label">
+              用户数据目录
+              <input id="playwrightUserDataDirInput" class="adm-input" name="userDataDir" placeholder="例：data/playwright-profile" />
+            </label>
+            <label class="adm-field-label adm-field-full">
+              目标歌单名称
+              <input id="playwrightPlaylistNameInput" class="adm-input" name="targetPlaylistName" placeholder="例：B107K歌之王" />
+            </label>
+          </div>
+          <div class="adm-action-row">
+            <button class="adm-btn adm-btn-primary" type="submit">保存配置</button>
+            <button id="launchPlaywrightButton" class="adm-btn adm-btn-secondary" type="button">启动浏览器</button>
+            <button id="openPlaylistButton" class="adm-btn adm-btn-secondary" type="button">打开共享歌单</button>
+            <button id="playPlaylistButton" class="adm-btn adm-btn-secondary" type="button">点击播放</button>
+            <button id="closePlaywrightButton" class="adm-btn adm-btn-danger" type="button">关闭浏览器</button>
+          </div>
+          <div class="adm-hint">接口沿用当前 Playwright 自动化流程。</div>
+        </form>
+      </div>
+
+      <div class="adm-card adm-summary-card">
+        <div class="adm-card-eyebrow">AUTOMATION SUMMARY</div>
+        <div id="playwrightSummary" class="adm-summary-content">Playwright 自动化当前未启用</div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>

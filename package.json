@@ -1,0 +1,17 @@
+{
+  "name": "music-scanplayer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LAN QR music request and shared queue service",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "playwright": "^1.58.2",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1"
+  }
+}

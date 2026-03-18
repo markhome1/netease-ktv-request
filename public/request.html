@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>扫码点歌</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="rq-body">
+  <main class="rq-page">
+
+    <header class="rq-header">
+      <span class="rq-brand">KTV Queue Live</span>
+      <span class="rq-live-badge">LIVE</span>
+    </header>
+
+    <div id="nowPlayingBox" class="rq-card rq-np-card">
+      <div class="rq-card-eyebrow">NOW PLAYING</div>
+      <div class="rq-np-title">正在加载...</div>
+    </div>
+
+    <div class="rq-stats-row">
+      <div class="rq-stat-card">
+        <div class="rq-stat-num" id="statQueueCount">—</div>
+        <div class="rq-stat-label">首待播</div>
+      </div>
+      <div class="rq-stat-card rq-stat-card-accent">
+        <div class="rq-stat-num rq-stat-num-time" id="statWaitTime">—:——</div>
+        <div class="rq-stat-label">预计等待</div>
+      </div>
+    </div>
+
+    <div class="rq-card rq-form-card">
+      <div class="rq-card-eyebrow">SONG REQUEST</div>
+      <h2 class="rq-form-heading">提交下一首</h2>
+      <form id="requestForm">
+        <input
+          name="neteaseUrl"
+          id="neteaseUrlInput"
+          class="rq-input"
+          placeholder="网易云歌曲链接 或 song:123456"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
+          required
+        />
+        <div id="neteaseHint" class="rq-hint">支持网易云单曲链接，不接受歌单。</div>
+        <button class="rq-btn-submit" type="submit">立即接龙</button>
+        <div id="formMessage" class="rq-message"></div>
+      </form>
+    </div>
+
+    <div class="rq-rules-card">
+      <div class="rq-rule">只支持单曲，不收歌单链接。</div>
+      <div class="rq-rule">系统自动进共享歌单，无需人工审核。</div>
+      <div class="rq-rule">等待时长按当前进度和队列实时估算。</div>
+    </div>
+
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/request.js"></script>
+</body>
+</html>
