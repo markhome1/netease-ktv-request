@@ -1,6 +1,8 @@
-# music-scanplayer
+# netease-ktv-request
 
-局域网 KTV 扫码点歌系统。主机运行 Node.js 服务，生成二维码；手机扫码打开点歌页，粘贴网易云歌曲链接提交；服务端通过 Playwright 自动将歌曲写入网易云共享歌单并依次播放。
+**网易云 KTV 扫码点歌系统** · QR-based song request queue for NetEase Music
+
+局域网 KTV 点歌工具。主机运行 Node.js 服务，生成二维码；手机扫码打开点歌页，粘贴网易云歌曲链接提交；服务端通过 Playwright 自动将歌曲写入网易云共享歌单并依次播放，实时显示预计等待时间。
 
 ---
 
@@ -109,8 +111,8 @@ tryAutoSyncQueueEntry()       ← 判断：立即播放 还是 进队列等待
 ### 安装
 
 ```bash
-git clone https://github.com/markhome1/music-scanplayer.git
-cd music-scanplayer
+git clone https://github.com/markhome1/netease-ktv-request.git
+cd netease-ktv-request
 npm install
 npx playwright install chromium   # 首次安装 Playwright 浏览器
 ```
