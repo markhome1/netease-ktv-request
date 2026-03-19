@@ -7,7 +7,7 @@ const QRCode = require('qrcode');
 const { Server } = require('socket.io');
 const { resolveNeteaseInput } = require('./lib/netease');
 const { normalizeBaseUrl, fetchSongUrl, addTrackToPlaylist } = require('./lib/netease-api');
-const { createPlaywrightConfig, getStatus: getPlaywrightStatus, getPlaybackSnapshot, openTargetPlaylist, playTargetPlaylist, addSongToPlaylist: addSongToPlaylistWithPlaywright, closeBrowser: closePlaywrightBrowser } = require('./lib/netease-playwright');
+const { createPlaywrightConfig, ensurePage: ensurePlaywrightPage, getStatus: getPlaywrightStatus, getPlaybackSnapshot, openTargetPlaylist, playTargetPlaylist, addSongToPlaylist: addSongToPlaylistWithPlaywright, searchSongs: searchSongsWithPlaywright, clearNetPlayQueue, getPlaylist: getPlaylistFromPlayer, playFromPlaylist: playFromPlayerPlaylist, pausePlayback, resumePlayback, skipToNext, getVolume, setVolume, closeBrowser: closePlaywrightBrowser } = require('./lib/netease-playwright');
 const { launchExternalPlayer } = require('./lib/external-player');
 const { createOfficialConfig, validateOfficialConfig, explainOfficialMode } = require('./lib/netease-openapi');
 const { OFFICIAL_ENDPOINTS } = require('./lib/netease-openapi-endpoints');
@@ -34,6 +34,7 @@ function createInitialState() {
     pendingRequests: [],
     queue: [],
     nowPlaying: null,
+    pauseAfterCurrent: false,
     history: [],
     netease: {
       provider: 'third-party-compatible',
@@ -128,8 +129,10 @@ function buildPublicState() {
     pendingRequests: state.pendingRequests,
     queue: state.queue,
     nowPlaying: state.nowPlaying,
+    pauseAfterCurrent: state.pauseAfterCurrent || false,
     history: state.history,
     queueTiming: buildQueueTimingSummary(),
+    playerPlaylist: buildPlaylistWaitQueue(),
     netease: state.netease,
     player: state.player,
     updatedAt: state.updatedAt
@@ -145,22 +148,104 @@ async function refreshPlaybackSnapshot() {
   try {
     const snapshot = await getPlaybackSnapshot();
     state.netease.playbackSnapshot = snapshot;
+
+    // 用播放器实际读取的时长校正 nowPlaying 的元数据
+    // readSongMetadata/readPlaylistSongMetadata 偶尔会读错时长
+    if (snapshot && state.nowPlaying && snapshot.durationMs > 0) {
+      const stored = state.nowPlaying.durationMs || 0;
+      if (Math.abs(stored - snapshot.durationMs) > 5000) {
+        state.nowPlaying.durationMs = snapshot.durationMs;
+        state.nowPlaying.durationText = snapshot.durationText || formatDurationMs(snapshot.durationMs);
+      }
+    }
+
     return snapshot;
   } catch {
     return state.netease.playbackSnapshot || null;
   }
 }
 
+// 播放列表缓存：定期从 Playwright 浏览器读取，用于等待队列和查重
+let cachedPlayerPlaylist = [];
+let cachedPlayerPlaylistAt = 0;
+let pollCycleCount = 0;
+
+async function refreshCachedPlaylist() {
+  if (!state.netease.playwright?.enabled) {
+    cachedPlayerPlaylist = [];
+    return;
+  }
+  try {
+    cachedPlayerPlaylist = await getPlaylistFromPlayer();
+    cachedPlayerPlaylistAt = Date.now();
+  } catch {}
+}
+
+function parseDurationTextMs(text) {
+  const match = String(text || '').match(/(?:(\d{1,2}):)?(\d{1,2}):(\d{2})/);
+  if (!match) return 0;
+  return (Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0)) * 1000;
+}
+
+function buildPlaylistWaitQueue() {
+  if (!cachedPlayerPlaylist.length) {
+    return { all: [], waitQueue: [], queueLength: 0, nextRequestWaitMs: 0, currentSongRemainingMs: 0, updatedAt: 0 };
+  }
+
+  const currentIdx = cachedPlayerPlaylist.findIndex(s => s.isCurrent);
+  const afterCurrent = currentIdx >= 0 ? cachedPlayerPlaylist.slice(currentIdx + 1) : [];
+
+  const snapshot = state.netease.playbackSnapshot;
+  let cumulative = snapshot && Number.isFinite(snapshot.remainingMs) && snapshot.remainingMs > 0
+    ? snapshot.remainingMs : 0;
+  const currentSongRemainingMs = cumulative;
+
+  const waitQueue = afterCurrent.map(song => {
+    const waitMs = cumulative;
+    cumulative += parseDurationTextMs(song.duration);
+    return { ...song, waitMs };
+  });
+
+  return {
+    all: cachedPlayerPlaylist,
+    waitQueue,
+    queueLength: afterCurrent.length,
+    nextRequestWaitMs: cumulative,
+    currentSongRemainingMs,
+    updatedAt: cachedPlayerPlaylistAt
+  };
+}
+
 // 自动推进：轮询网易云播放器，检测到切歌则同步服务器队列
 let autoAdvancePollTimer = null;
 let lastPolledSongId = '';
 
+async function handlePauseAfterCurrent() {
+  if (!state.pauseAfterCurrent) return false;
+  state.pauseAfterCurrent = false;
+  await pausePlayback().catch(() => {});
+  persistState();
+  broadcastState();
+  return true;
+}
+
+let playwrightBootstrapped = false;
+
 async function autoAdvancePoll() {
+  pollCycleCount++;
   try {
-    // 时间兜底：nowPlaying 播放时长已超过 durationMs + 8s → 强制推进
+    // 首次轮询时自动启动 Playwright 浏览器（如果已启用）
+    if (!playwrightBootstrapped && state.netease.playwright?.enabled) {
+      playwrightBootstrapped = true;
+      const pwConfig = state.netease.playwright;
+      const targetUrl = state.netease.targetPlaylistCanonicalUrl || 'https://music.163.com/';
+      try { await ensurePlaywrightPage(__dirname, pwConfig, targetUrl); } catch {}
+    }
+
     if (state.nowPlaying && state.nowPlaying.durationMs && state.nowPlaying.startedAt) {
       const elapsed = Date.now() - new Date(state.nowPlaying.startedAt).getTime();
       if (elapsed > state.nowPlaying.durationMs + 8000 && state.queue.length > 0) {
+        if (await handlePauseAfterCurrent()) return;
         await moveQueueToNowPlaying('finished');
         persistState();
         broadcastState();
@@ -169,49 +254,55 @@ async function autoAdvancePoll() {
     }
 
     const snapshot = await refreshPlaybackSnapshot();
+
+    // 每 4 个周期（~20s）刷新播放列表缓存
+    if (pollCycleCount % 4 === 0) {
+      await refreshCachedPlaylist();
+    }
+
+    broadcastState();
+
     if (!snapshot) return;
 
     const playingSongId = snapshot.songId || '';
     if (!playingSongId) return;
 
-    // 歌曲 ID 没变 → 无需处理
     if (playingSongId === lastPolledSongId) return;
     lastPolledSongId = playingSongId;
 
-    // 找出这首歌在系统里是哪个请求
+    // 切歌了，立即刷新播放列表
+    await refreshCachedPlaylist();
+
     const nowPlayingId = state.nowPlaying?.neteaseResolved?.id;
 
-    if (playingSongId === nowPlayingId) return; // 已经对上，不用动
+    if (playingSongId === nowPlayingId) return;
 
-    // 在队列里找到这首歌
+    if (await handlePauseAfterCurrent()) return;
+
     const queueIdx = state.queue.findIndex(
       (item) => item.neteaseResolved?.id === playingSongId
     );
 
     if (queueIdx === 0) {
-      // 队列第一首开始播了 → 正常推进
       await moveQueueToNowPlaying('finished');
       persistState();
       broadcastState();
     } else if (queueIdx > 0) {
-      // 中间某首开始播了（跳歌）→ 把之前的歌全部标为 skipped
       for (let i = 0; i < queueIdx; i++) {
         await moveQueueToNowPlaying('skipped');
       }
       persistState();
       broadcastState();
     } else if (!nowPlayingId && state.queue.length > 0) {
-      // 网易云在播但服务器还没 nowPlaying → 推进第一首
       await moveQueueToNowPlaying('finished');
       persistState();
       broadcastState();
     }
   } catch {
-    // 静默失败，不中断轮询
   }
 }
 
-function startAutoAdvancePolling(intervalMs = 6000) {
+function startAutoAdvancePolling(intervalMs = 5000) {
   if (autoAdvancePollTimer) clearInterval(autoAdvancePollTimer);
   autoAdvancePollTimer = setInterval(autoAdvancePoll, intervalMs);
 }
@@ -366,13 +457,34 @@ function buildWaitEstimateForItem(itemId, queueOverride = state.queue, playbackS
 }
 
 function buildQueueTimingSummary() {
-  const hypotheticalItemId = '__new_request__';
-  const estimate = buildWaitEstimateForItem(hypotheticalItemId, [...state.queue, { id: hypotheticalItemId }], state.netease.playbackSnapshot);
+  const playbackSnapshot = state.netease.playbackSnapshot;
+  const isPaused = playbackSnapshot && playbackSnapshot.isPlaying === false;
+
+  let currentSongRemainingMs = null;
+  if (playbackSnapshot && Number.isFinite(playbackSnapshot.remainingMs)) {
+    currentSongRemainingMs = playbackSnapshot.remainingMs;
+  } else {
+    currentSongRemainingMs = getRemainingMs(state.nowPlaying);
+  }
+  if (currentSongRemainingMs === null) currentSongRemainingMs = 0;
+  if (isPaused) currentSongRemainingMs = 0;
+
+  const queueWaits = [];
+  let cumulative = currentSongRemainingMs;
+  for (const item of state.queue) {
+    queueWaits.push({ id: item.id, waitMs: cumulative });
+    const dur = getDurationMs(item);
+    cumulative += dur || 0;
+  }
 
   return {
-    nextRequest: estimate,
+    currentSongRemainingMs,
+    nextRequestWaitMs: cumulative,
     queueLength: state.queue.length,
-    currentSong: state.netease.playbackSnapshot || state.nowPlaying || null
+    queueWaits,
+    isPaused: !!isPaused,
+    currentSong: playbackSnapshot || state.nowPlaying || null,
+    calculatedAt: Date.now()
   };
 }
 
@@ -497,13 +609,24 @@ async function tryAutoSyncQueueEntry(entry) {
     await refreshPlaybackSnapshot().catch(() => null);
 
     const snapshot = state.netease.playbackSnapshot;
-    // "真正在播" = 有标题 AND elapsed > 3秒 AND isPlaying 不是 false（暂停也算空闲）
+    // "真正在播" = 有标题 AND elapsed > 3秒 AND isPlaying 不是 false
     const neteaseIsActuallyPlaying = snapshot?.title
       && Number.isFinite(snapshot.elapsedMs)
       && snapshot.elapsedMs > 3000
       && snapshot.isPlaying !== false;
-    const serverIsIdle = !state.nowPlaying;
-    const shouldTriggerPlayback = !neteaseIsActuallyPlaying && serverIsIdle;
+
+    // 正在播放 → 只加队列不打断；没在播放 → 直接播放
+    const shouldTriggerPlayback = !neteaseIsActuallyPlaying;
+
+    // 没在播放且队列之前是空的 → 先清旧播放列表再添加，避免新歌排在旧歌后面
+    if (shouldTriggerPlayback) {
+      const otherQueueItems = state.queue.filter(q => q.id !== entry.sourceRequestId).length;
+      if (otherQueueItems === 0) {
+        await clearNetPlayQueue().catch(err =>
+          console.warn(`[tryAutoSyncQueueEntry] 清空播放列表失败: ${err.message}`)
+        );
+      }
+    }
 
     try {
       const result = await addSongToPlaylistWithPlaywright(__dirname, state.netease.playwright, {
@@ -532,6 +655,9 @@ async function tryAutoSyncQueueEntry(entry) {
         lastAction: 'sync-song',
         lastActionAt: new Date().toISOString()
       });
+
+      // 同步成功后刷新播放列表缓存
+      await refreshCachedPlaylist();
     } catch (error) {
       entry.status = 'failed-playwright';
       entry.updatedAt = new Date().toISOString();
@@ -735,6 +861,16 @@ app.post('/api/requests', async (req, res) => {
     return;
   }
 
+  // 查重：检查歌曲是否已在播放列表的等待队列中
+  const resolved = resolveNeteaseInput(String(req.body.neteaseUrl || '').trim());
+  if (resolved && resolved.type === 'song' && cachedPlayerPlaylist.length > 0) {
+    const currentIdx = cachedPlayerPlaylist.findIndex(s => s.isCurrent);
+    const upcoming = currentIdx >= 0 ? cachedPlayerPlaylist.slice(currentIdx) : cachedPlayerPlaylist;
+    if (upcoming.some(s => s.id === resolved.id)) {
+      return res.status(400).json({ error: '这首歌已在播放列表中，无需重复点歌' });
+    }
+  }
+
   const requestItem = createSongEntry(req.body);
 
   if (state.netease.autoApproveRequests) {
@@ -819,6 +955,107 @@ app.post('/api/config/netease-playwright', (req, res) => {
   persistState();
   broadcastState();
   res.json({ ok: true, playwright: state.netease.playwright });
+});
+
+app.post('/api/player/pause', async (req, res) => {
+  const ok = await pausePlayback();
+  await refreshPlaybackSnapshot().catch(() => null);
+  broadcastState();
+  res.json({ ok });
+});
+
+app.post('/api/player/resume', async (req, res) => {
+  const ok = await resumePlayback();
+  await refreshPlaybackSnapshot().catch(() => null);
+  broadcastState();
+  res.json({ ok });
+});
+
+app.post('/api/player/skip', async (req, res) => {
+  const ok = await skipToNext();
+  // 等网易云切歌完成再刷新
+  await new Promise(r => setTimeout(r, 800));
+  await refreshPlaybackSnapshot().catch(() => null);
+  broadcastState();
+  res.json({ ok });
+});
+
+app.get('/api/player/volume', async (req, res) => {
+  const vol = await getVolume();
+  res.json({ ok: true, volume: vol });
+});
+
+app.post('/api/player/volume', async (req, res) => {
+  const vol = Number(req.body.volume);
+  if (!Number.isFinite(vol) || vol < 0 || vol > 100) {
+    return res.status(400).json({ error: '音量范围 0-100' });
+  }
+  const ok = await setVolume(vol);
+  res.json({ ok, volume: vol });
+});
+
+app.post('/api/search', async (req, res) => {
+  const keyword = String(req.body.keyword || '').trim();
+  if (!keyword) {
+    return res.status(400).json({ error: '请输入搜索关键词' });
+  }
+  if (!state.netease.playwright?.enabled) {
+    return res.status(400).json({ error: 'Playwright 尚未启用，请在管理后台开启' });
+  }
+  try {
+    const results = await searchSongsWithPlaywright(__dirname, state.netease.playwright, keyword);
+    res.json({ ok: true, keyword, results });
+  } catch (error) {
+    res.status(500).json({ error: `搜索失败：${error.message}` });
+  }
+});
+
+app.get('/api/playlist', async (req, res) => {
+  if (!state.netease.playwright?.enabled) {
+    return res.status(400).json({ error: 'Playwright 尚未启用' });
+  }
+  try {
+    const songs = await getPlaylistFromPlayer();
+    cachedPlayerPlaylist = songs;
+    cachedPlayerPlaylistAt = Date.now();
+    broadcastState();
+    res.json({ ok: true, songs });
+  } catch (error) {
+    res.status(500).json({ error: `读取播放列表失败：${error.message}` });
+  }
+});
+
+app.post('/api/playlist/play/:songId', async (req, res) => {
+  if (!state.netease.playwright?.enabled) {
+    return res.status(400).json({ error: 'Playwright 尚未启用' });
+  }
+  try {
+    const ok = await playFromPlayerPlaylist(req.params.songId);
+    if (ok) {
+      await new Promise(r => setTimeout(r, 600));
+      await refreshPlaybackSnapshot().catch(() => null);
+      broadcastState();
+    }
+    res.json({ ok });
+  } catch (error) {
+    res.status(500).json({ error: `播放失败：${error.message}` });
+  }
+});
+
+app.post('/api/playlist/clear', async (req, res) => {
+  if (!state.netease.playwright?.enabled) {
+    return res.status(400).json({ error: 'Playwright 尚未启用' });
+  }
+  try {
+    const ok = await clearNetPlayQueue();
+    if (ok) {
+      await refreshPlaybackSnapshot().catch(() => null);
+      broadcastState();
+    }
+    res.json({ ok });
+  } catch (error) {
+    res.status(500).json({ error: `清除失败：${error.message}` });
+  }
 });
 
 app.post('/api/netease/playwright/launch', async (req, res) => {
@@ -1065,6 +1302,6 @@ server.listen(PORT, () => {
   // 如果 Playwright 已启用，启动自动推进轮询
   if (state.netease.playwright && state.netease.playwright.enabled) {
     startAutoAdvancePolling();
-    console.log('auto-advance polling started (6s interval)');
+    console.log('auto-advance polling started (5s interval)');
   }
 });

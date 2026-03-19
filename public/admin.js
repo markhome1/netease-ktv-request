@@ -10,6 +10,7 @@ const playlistTile = document.getElementById('playlistTile');
 const playwrightForm = document.getElementById('playwrightForm');
 const playwrightEnabledInput = document.getElementById('playwrightEnabledInput');
 const playwrightHeadlessInput = document.getElementById('playwrightHeadlessInput');
+const playwrightAutoMinimizeInput = document.getElementById('playwrightAutoMinimizeInput');
 const playwrightAutoPlayInput = document.getElementById('playwrightAutoPlayInput');
 const playwrightBrowserChannelInput = document.getElementById('playwrightBrowserChannelInput');
 const playwrightUserDataDirInput = document.getElementById('playwrightUserDataDirInput');
@@ -106,6 +107,7 @@ function renderAll(state) {
   // — 表单字段（仅在未聚焦时更新） —
   playwrightEnabledInput.checked = Boolean(config.enabled);
   playwrightHeadlessInput.checked = Boolean(config.headless);
+  playwrightAutoMinimizeInput.checked = config.autoMinimize !== false;
   playwrightAutoPlayInput.checked = config.autoPlayAfterSync !== false;
   if (document.activeElement !== playwrightBrowserChannelInput) {
     playwrightBrowserChannelInput.value = config.browserChannel || '';
@@ -149,6 +151,7 @@ playwrightForm.addEventListener('submit', async (event) => {
   await post('/api/config/netease-playwright', {
     enabled: playwrightEnabledInput.checked,
     headless: playwrightHeadlessInput.checked,
+    autoMinimize: playwrightAutoMinimizeInput.checked,
     autoPlayAfterSync: playwrightAutoPlayInput.checked,
     browserChannel: playwrightBrowserChannelInput.value,
     userDataDir: playwrightUserDataDirInput.value,

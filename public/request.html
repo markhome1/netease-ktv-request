@@ -30,24 +30,76 @@
       </div>
     </div>
 
+    <div class="rq-card rq-ctrl-card">
+      <div class="rq-ctrl-row">
+        <button class="rq-ctrl-btn" id="btnPlayPause">
+          <span class="rq-ctrl-icon" id="playPauseIcon">⏸</span>
+          <span id="playPauseLabel">暂停</span>
+        </button>
+        <button class="rq-ctrl-btn" id="btnSkip">
+          <span class="rq-ctrl-icon">⏭</span>
+          <span>切歌</span>
+        </button>
+        <div class="rq-vol-group">
+          <span class="rq-vol-icon">🔊</span>
+          <input type="range" id="volumeSlider" class="rq-vol-slider" min="0" max="100" value="70" />
+          <span class="rq-vol-num" id="volumeNum">70</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="rq-card rq-playlist-card" id="playerPlaylistCard">
+      <div class="rq-playlist-header">
+        <div class="rq-card-eyebrow" style="margin-bottom:0">PLAYER PLAYLIST</div>
+        <div class="rq-playlist-actions">
+          <button class="rq-btn-refresh-pl" id="btnRefreshPlaylist" type="button" title="刷新">⟳</button>
+          <button class="rq-btn-clear-pl" id="btnClearPlaylist" type="button">清除列表</button>
+        </div>
+      </div>
+      <div class="rq-playlist-body" id="playerPlaylistBody">
+        <div class="rq-results-empty">点击 ⟳ 加载播放列表</div>
+      </div>
+    </div>
+
     <div class="rq-card rq-form-card">
       <div class="rq-card-eyebrow">SONG REQUEST</div>
       <h2 class="rq-form-heading">提交下一首</h2>
-      <form id="requestForm">
-        <input
-          name="neteaseUrl"
-          id="neteaseUrlInput"
-          class="rq-input"
-          placeholder="网易云歌曲链接 或 song:123456"
-          autocomplete="off"
-          autocorrect="off"
-          spellcheck="false"
-          required
-        />
-        <div id="neteaseHint" class="rq-hint">支持网易云单曲链接，不接受歌单。</div>
-        <button class="rq-btn-submit" type="submit">立即接龙</button>
-        <div id="formMessage" class="rq-message"></div>
-      </form>
+
+      <div class="rq-tab-row">
+        <button class="rq-tab rq-tab-active" id="tabSearch">搜索歌曲</button>
+        <button class="rq-tab" id="tabLink">粘贴链接</button>
+      </div>
+
+      <div id="searchPanel">
+        <div class="rq-search-row">
+          <input id="searchInput" class="rq-search-input" placeholder="歌名 / 歌手" autocomplete="off" />
+          <button class="rq-btn-search" id="searchBtn" type="button">搜索</button>
+        </div>
+        <div id="searchResults" class="rq-results"></div>
+      </div>
+
+      <div id="linkPanel" style="display:none">
+        <form id="requestForm">
+          <input
+            name="neteaseUrl"
+            id="neteaseUrlInput"
+            class="rq-input"
+            placeholder="网易云歌曲链接 或 song:123456"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+            required
+          />
+          <div id="neteaseHint" class="rq-hint">支持网易云单曲链接，不接受歌单。</div>
+          <button class="rq-btn-submit" type="submit">立即接龙</button>
+        </form>
+      </div>
+      <div id="formMessage" class="rq-message"></div>
+    </div>
+
+    <div class="rq-card rq-queue-card" id="queueListCard" style="display:none">
+      <div class="rq-card-eyebrow">WAITING QUEUE</div>
+      <div class="rq-queue-list" id="queueList"></div>
     </div>
 
     <div class="rq-rules-card">
